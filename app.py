@@ -49,14 +49,23 @@ with aba_novo:
                 data_proc = datetime.now().strftime("%d/%m/%Y %H:%M")
                 for arq in arquivos:
                     d = extrair_dados_xml(arq)
+                    # ... dentro do loop for arq in arquivos:
                     if d:
                         d = calcular_custos(d, p_base, p_logcare)
                         lista.append({
-                            "Lote": id_lote, "Data_Processamento": data_proc,
-                            "Nota": str(d["Nota"]), "Emissao": d["Emissao"],
-                            "Emitente": d["Emitente"], "Valor_Total": round(float(d["Valor_Total"]), 2),
-                            "Custo_Base": round(float(d["Custo_Base"]), 2), "Custo_Logcare": round(float(d["Custo_Logcare"]), 2),
-                            "Custo_Total_Nota": round(float(d["Custo_Total_Nota"]), 2)
+                            "Lote": id_lote, 
+                            "Data_Processamento": data_proc,
+                            "Nota": str(d["Nota"]), 
+                            "Emissao": d["Emissao"],
+                            "Emitente": d["Emitente"], 
+                            "Valor_Total": round(float(d["Valor_Total"]), 2),
+                            "Custo_Base": round(float(d["Custo_Base"]), 2), 
+                            "Custo_Logcare": round(float(d["Custo_Logcare"]), 2),
+                            "Custo_Total_Nota": round(float(d["Custo_Total_Nota"]), 2),
+                            "Endereco": d["Endereco_Destino"], 
+                            "KM": d["KM_Estimado"],             
+                            "Lat": d["Latitude"],               
+                            "Long": d["Longitude"]              
                         })
                 if lista:
                     salvar_no_banco(pd.DataFrame(lista))
@@ -134,6 +143,16 @@ with aba_historico:
         s3.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
 
         # Mostra a tabela final organizada
+        # Mostra a tabela final organizada
         cols_ordenadas = ['Status'] + [c for c in df_filtrado.columns if c != 'Status']
-        st.dataframe(df_filtrado[cols_ordenadas], use_container_width=True)
-# Versao restaurada em 29/04/2026
+        
+        # Cria uma visualização renomeando os cabeçalhos para incluir as unidades
+        df_visual = df_filtrado[cols_ordenadas].rename(columns={
+            "KM": "Distância (KM)",
+            "Valor_Total": "Valor Total (R$)",
+            "Custo_Base": "Custo Base (R$)",
+            "Custo_Logcare": "Custo Logcare (R$)",
+            "Custo_Total_Nota": "Custo Total (R$)"
+        })
+        
+        st.dataframe(df_visual, use_container_width=True)
