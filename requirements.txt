@@ -50,3 +50,4 @@ tzdata==2026.1
 urllib3==2.6.3
 watchdog==6.0.0
 xlsxwriter==3.2.9
+geopy
