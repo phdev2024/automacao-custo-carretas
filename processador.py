@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
+import streamlit as st
 import time
 
 # Configurações de Geolocalização
@@ -35,12 +36,33 @@ def extrair_dados_xml(arquivo):
             "Valor_Total": float(carregar('.//nfe:total/nfe:ICMSTot/nfe:vNF') or 0),
             "Endereco_Destino": f"{rua}, {nro}, {cidade} - {uf}",
             "CEP_Destino": cep, # Guardamos o CEP aqui
-            "Cidade": cidade,  # Adicione esta linha
-            "UF": uf           # Adicione esta linha
+            "Cidade": cidade,   # Cidade isolada para o GPS
+            "UF": uf            # UF isolada para o GPS
         }
         return dados
     except Exception as e:
         return None
+
+# MÁGICA DA PERFORMANCE: Memória e Pausa Anti-bloqueio
+@st.cache_data(show_spinner=False)
+def buscar_coordenadas(cidade, uf, cep):
+    # REGRA DE ETIQUETA: Espera 1.5s antes de incomodar o GPS para evitar bloqueio.
+    time.sleep(1.5) 
+    
+    try:
+        # PLANO A: Cidade, Estado
+        busca_principal = f"{cidade}, {uf}, Brazil"
+        location = geolocator.geocode(busca_principal, timeout=15)
+        
+        # PLANO B: CEP
+        if not location and cep:
+            location = geolocator.geocode({"postalcode": cep, "country": "Brazil"}, timeout=15)
+            
+        if location:
+            return location.latitude, location.longitude
+        return None, None
+    except:
+        return None, None
 
 def calcular_distancia(dados_xml):
     try:
@@ -49,29 +71,24 @@ def calcular_distancia(dados_xml):
         uf = dados_xml.get("UF", "")
         cep = str(dados_xml.get("CEP_Destino", "")).replace("-", "").strip()
         
-        # PLANO A: Cidade, Estado, Brasil (Altíssima taxa de acerto no Geopy)
-        busca_principal = f"{cidade}, {uf}, Brazil"
-        location = geolocator.geocode(busca_principal, timeout=15)
-        
-        # PLANO B: Se a cidade falhar, tentamos pelo CEP puro
-        if not location:
-            location = geolocator.geocode({"postalcode": cep, "country": "Brazil"}, timeout=15)
+        # Busca inteligente (Usa memória se a cidade já foi pesquisada)
+        lat, lon = buscar_coordenadas(cidade, uf, cep)
             
-        if location:
-            coord_cliente = (location.latitude, location.longitude)
+        if lat is not None and lon is not None:
+            coord_cliente = (lat, lon)
             
-            # Cálculo e aplicação do Fator de 20%
+            # Cálculo e aplicação do Fator de correção de 20%
             distancia_reta = geodesic(COORD_BASE, coord_cliente).km
             distancia_final = distancia_reta * 1.20
             
-            return round(distancia_final, 2), location.latitude, location.longitude
+            return round(distancia_final, 2), lat, lon
             
         return 0, 0, 0
     except Exception as e:
         return 0, 0, 0
 
 def calcular_custos(dados, p_base, p_logcare):
-    # Agora passamos o pacote de 'dados' completo para o GPS se virar
+    # Passamos o pacote de 'dados' completo para o GPS se virar
     km, lat, lon = calcular_distancia(dados)
     
     dados["KM_Estimado"] = km
