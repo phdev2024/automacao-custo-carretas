@@ -27,26 +27,27 @@ def resetar_formulario():
 
 data_hoje = datetime.now().strftime("%d/%m/%Y")
 
-st.title("🚚 Gestão de Entregas - Ortobom ")
+st.title("🚚 Gestão de Entregas - Ortobom")
 
-aba_novo, aba_historico = st.tabs(["🆕 Novo Lote", "📊 Dashboard e Status"])
-
-with aba_novo:
-    # --- Menu Retrátil de Configurações (Ganha espaço na tela) ---
-    with st.expander("⚙️ Configurações de Taxas e Limpeza", expanded=False):
-        col_t1, col_t2, col_t3 = st.columns(3)
-        with col_t1:
-            p_base = st.number_input("Taxa Base (%)", value=8.0) / 100
-        with col_t2:
-            p_logcare = st.number_input("Taxa Logcare (%)", value=7.0) / 100
-        with col_t3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.button("🧹 Limpar Tudo", on_click=resetar_formulario, use_container_width=True)
-
+# =====================================================================
+# ⚙️ BARRA LATERAL: ENTRADA DE DADOS E PROCESSAMENTO
+# =====================================================================
+with st.sidebar:
+    st.header("📥 Upload de Lote")
+    
     id_lote = st.text_input("Identificação do Lote:", value=data_hoje, key=f"lote_{st.session_state['uploader_key']}")
     arquivos = st.file_uploader("Upload XMLs", type=["xml"], accept_multiple_files=True, key=f"xml_{st.session_state['uploader_key']}")
+    
+    st.markdown("---")
+    st.header("⚙️ Configurações de Taxas")
+    p_base = st.number_input("Taxa Base (%)", value=8.0) / 100
+    p_logcare = st.number_input("Taxa Logcare (%)", value=7.0) / 100
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    bt_processar = st.button("🚀 Processar e Sincronizar", use_container_width=True)
+    st.button("🧹 Limpar Painel de Upload", on_click=resetar_formulario, use_container_width=True)
 
-    if st.button("🚀 Processar e Sincronizar"):
+    if bt_processar:
         if id_lote and arquivos:
             with st.status("Sincronizando...", expanded=True) as status:
                 lista = []
@@ -66,103 +67,132 @@ with aba_novo:
                             "Custo_Logcare": round(float(d["Custo_Logcare"]), 2),
                             "Custo_Total_Nota": round(float(d["Custo_Total_Nota"]), 2),
                             "Endereco": d.get("Endereco_Destino", ""),
-                            
-                            # TRADUÇÃO PARA O SHEETS: Troca o ponto pela vírgula antes de salvar!
                             "KM": round(float(d.get("KM_Estimado", 0)), 2),             
                             "Lat": float(d.get("Latitude", 0)),               
-                            "Long": float(d.get("Longitude", 0))            
+                            "Long": float(d.get("Longitude", 0))              
                         })
                 if lista:
                     salvar_no_banco(pd.DataFrame(lista))
                     status.update(label="✅ Sincronizado!", state="complete")
                     st.success("Lote enviado com sucesso.")
-                    st.button("🔄 Próxima Importação", on_click=resetar_formulario)
+                    st.rerun()
 
-with aba_historico:
-    df_h = consultar_historico()
-    df_entregas = consultar_entregas()
+# =====================================================================
+# 📊 PÁGINA PRINCIPAL: DASHBOARD E STATUS (SEMPRE VISÍVEL)
+# =====================================================================
+df_h = consultar_historico()
+df_entregas = consultar_entregas()
+
+if not df_h.empty:
+    st.markdown("### 🔍 Filtros de Visualização")
+    col_f1, col_f2 = st.columns(2)
     
-    if not df_h.empty:
-        st.markdown("### 🔍 Filtros de Visualização")
-        col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        lotes_disponiveis = ["Todos"] + list(df_h['Lote'].unique())
+        escolha_lote = st.selectbox("Filtrar por Lote:", lotes_disponiveis)
+    
+    with col_f2:
+        status_disponiveis = ["Todos", "✅ Entregue", "⏳ Pendente", "🚨 Devolução Fábrica"]
+        escolha_status = st.selectbox("Filtrar por Status:", status_disponiveis)
+
+    # Lógica Avançada para capturar Devoluções escritas manualmente na planilha
+    def definir_status(linha_nota, df_entregas):
+        nota_tratada = str(linha_nota).strip().split('.')[0]
+        if df_entregas.empty:
+            return "⏳ Pendente"
+            
+        # Tenta identificar o nome exato da coluna de notas fiscais na planilha de entregas
+        col_nf = 'Nota Fiscal' if 'Nota Fiscal' in df_entregas.columns else df_entregas.columns[0]
+        match_entrega = df_entregas[df_entregas[col_nf].astype(str).str.strip().str.split('.').str[0] == nota_tratada]
         
-        with col_f1:
-            lotes_disponiveis = ["Todos"] + list(df_h['Lote'].unique())
-            escolha_lote = st.selectbox("Filtrar por Lote:", lotes_disponiveis)
+        if not match_entrega.empty:
+            # Se a linha contiver a palavra "devolu" em qualquer campo, muda o status
+            conteudo_linha = str(match_entrega.values).lower()
+            if "devolu" in conteudo_linha:
+                return "🚨 Devolução Fábrica"
+            return "✅ Entregue"
         
-        with col_f2:
-            status_disponiveis = ["Todos", "✅ Entregue", "⏳ Pendente"]
-            escolha_status = st.selectbox("Filtrar por Status:", status_disponiveis)
+        return "⏳ Pendente"
 
-        def tratar(v): return str(v).strip().split('.')[0]
-        notas_ok = df_entregas['Nota Fiscal'].apply(tratar).tolist() if not df_entregas.empty else []
-        df_h['Status'] = df_h['Nota'].apply(lambda x: "✅ Entregue" if tratar(x) in notas_ok else "⏳ Pendente")
+    df_h['Status'] = df_h['Nota'].apply(lambda x: definir_status(x, df_entregas))
 
-        df_filtrado = df_h.copy()
-        if escolha_lote != "Todos":
-            df_filtrado = df_filtrado[df_filtrado['Lote'] == escolha_lote]
-        if escolha_status != "Todos":
-            df_filtrado = df_filtrado[df_filtrado['Status'] == escolha_status]
+    df_filtrado = df_h.copy()
+    if escolha_lote != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['Lote'] == escolha_lote]
+    if escolha_status != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['Status'] == escolha_status]
 
-        def limpar_moeda(v):
-            if isinstance(v, str): v = v.replace('R$', '').replace('.', '').replace(',', '.').strip()
-            try: return float(v)
-            except: return 0.0
+    def limpar_moeda(v):
+        if isinstance(v, str): v = v.replace('R$', '').replace('.', '').replace(',', '.').strip()
+        try: return float(v)
+        except: return 0.0
 
-        v_total_f = df_filtrado['Valor_Total'].apply(limpar_moeda).sum()
-        c_total_f = df_filtrado['Custo_Total_Nota'].apply(limpar_moeda).sum()
-        n_entregues_f = len(df_filtrado[df_filtrado['Status'] == "✅ Entregue"])
-        eficiencia_f = (n_entregues_f / len(df_filtrado)) * 100 if len(df_filtrado) > 0 else 0
+    v_total_f = df_filtrado['Valor_Total'].apply(limpar_moeda).sum()
+    c_total_f = df_filtrado['Custo_Total_Nota'].apply(limpar_moeda).sum()
+    n_entregues_f = len(df_filtrado[df_filtrado['Status'] == "✅ Entregue"])
+    n_devolucoes_f = len(df_filtrado[df_filtrado['Status'] == "🚨 Devolução Fábrica"])
+    
+    eficiencia_f = (n_entregues_f / len(df_filtrado)) * 100 if len(df_filtrado) > 0 else 0
 
-        dados_excel = converter_para_excel(df_filtrado)
-        st.download_button(
-            label="📥 Exportar Relatório para Excel",
-            data=dados_excel,
-            file_name=f"Relatorio_Ortobom_{datetime.now().strftime('%d_%m_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-        cor_eficiencia = "normal" if eficiencia_f >= 90 else "inverse" if eficiencia_f < 75 else "off"
-        msg_eficiencia = "Excelente" if eficiencia_f >= 90 else "Abaixo da Meta" if eficiencia_f < 75 else "Na Média"
+    dados_excel = converter_para_excel(df_filtrado)
+    st.download_button(
+        label="📥 Exportar Relatório Filtrado para Excel",
+        data=dados_excel,
+        file_name=f"Relatorio_Ortobom_{datetime.now().strftime('%d_%m_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+    cor_eficiencia = "normal" if eficiencia_f >= 90 else "inverse" if eficiencia_f < 75 else "off"
+    msg_eficiencia = "Excelente" if eficiencia_f >= 90 else "Abaixo da Meta" if eficiencia_f < 75 else "Na Média"
 
-        st.markdown("#### 💰 Resumo Financeiro")
-        m1, m2, m3 = st.columns(3)
+    st.markdown("#### 💰 Resumo Financeiro")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Faturamento", f"R$ {formato_brasil(v_total_f)}")
+    m2.metric("Custo Total", f"R$ {formato_brasil(c_total_f)}")
+    m3.metric("Notas Total", len(df_filtrado))
 
-        m1.metric("Faturamento", f"R$ {formato_brasil(v_total_f)}")
-        m2.metric("Custo Total", f"R$ {formato_brasil(c_total_f)}")
-        m3.metric("Notas Total", len(df_filtrado))
+    st.markdown("#### 📦 Operacional")
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Entregues", n_entregues_f, delta="Concluído", delta_color="normal")
+    s2.metric("Devoluções", n_devolucoes_f, delta="Retorno Fábrica", delta_color="off")
+    s3.metric("Pendentes", len(df_filtrado) - n_entregues_f - n_devolucoes_f, delta="Aguardando", delta_color="inverse")
+    s4.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
 
-        st.markdown("#### 📦 Operacional")
-        s1, s2, s3 = st.columns(3)
+    # ---------------------------------------------------------------------
+    # FRONTEND: MAQUIAGEM VISUAL (Exibição sem quebras no Arrow)
+    # ---------------------------------------------------------------------
+    cols_ordenadas = ['Status'] + [c for c in df_filtrado.columns if c != 'Status']
+    df_visual = df_filtrado[cols_ordenadas].copy()
 
-        s1.metric("Entregues", n_entregues_f, delta="Concluído", delta_color="normal")
-        s2.metric("Pendentes", len(df_filtrado) - n_entregues_f, delta="Aguardando", delta_color="inverse")
-        s3.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
+    # Força a conversão rápida para string para evitar conflitos no Streamlit
+    for col in df_visual.columns:
+        df_visual[col] = df_visual[col].astype(str)
 
-        cols_ordenadas = ['Status'] + [c for c in df_filtrado.columns if c != 'Status']
-        
-        # 1. Cria a cópia visual e renomeia os cabeçalhos
-        df_visual = df_filtrado[cols_ordenadas].rename(columns={
-            "KM": "Distância (KM)",
-            "Valor_Total": "Valor Total (R$)",
-            "Custo_Base": "Custo Base (R$)",
-            "Custo_Logcare": "Custo Logcare (R$)",
-            "Custo_Total_Nota": "Custo Total (R$)"
-        }).copy()
-        
-        # 2. Formatação visual do KM de forma simples
-        # Mostra a tabela final organizada
-        cols_ordenadas = ['Status'] + [c for c in df_filtrado.columns if c != 'Status']
-        
-        # 1. Cria a cópia visual e renomeia os cabeçalhos
-        df_visual = df_filtrado[cols_ordenadas].rename(columns={
-            "KM": "Distância (KM)",
-            "Valor_Total": "Valor Total (R$)",
-            "Custo_Base": "Custo Base (R$)",
-            "Custo_Logcare": "Custo Logcare (R$)",
-            "Custo_Total_Nota": "Custo Total (R$)"
-        }).copy()
-        
-        # O bloco de formatação do KM foi totalmente removido para deixar o dado bruto!
+    df_visual = df_visual.rename(columns={
+        "KM": "Distância (KM)",
+        "Valor_Total": "Valor Total (R$)",
+        "Custo_Base": "Custo Base (R$)",
+        "Custo_Logcare": "Custo Logcare (R$)",
+        "Custo_Total_Nota": "Custo Total (R$)"
+    })
+    
+    def formatar_para_tela(v, prefixo=""):
+        try:
+            if v is None or v == "" or v == "nan": return f"{prefixo} 0,00".strip()
+            if "R$" in str(v): return v
+            num = float(str(v).replace(',', '.'))
+            return f"{prefixo} {formato_brasil(num)}".strip()
+        except:
+            return str(v)
 
-        st.dataframe(df_visual, use_container_width=True)
+    cols_fin = ["Valor Total (R$)", "Custo Base (R$)", "Custo Logcare (R$)", "Custo Total (R$)"]
+    for col in cols_fin:
+        if col in df_visual.columns:
+            df_visual[col] = df_visual[col].apply(lambda x: formatar_para_tela(x, "R$"))
+
+    if "Distância (KM)" in df_visual.columns:
+        df_visual["Distância (KM)"] = df_visual["Distância (KM)"].apply(lambda x: formatar_para_tela(x))
+
+    st.dataframe(df_visual, use_container_width=True)
+else:
+    st.info("Nenhum dado encontrado no histórico. Use a barra lateral para processar um novo lote de XMLs.")
