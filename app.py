@@ -92,24 +92,30 @@ if not df_h.empty:
         escolha_lote = st.selectbox("Filtrar por Lote:", lotes_disponiveis)
     
     with col_f2:
-        status_disponiveis = ["Todos", "✅ Entregue", "⏳ Pendente", "🚨 Devolução Fábrica"]
+        # Adicionamos "❌ Recusado" na lista de filtros da tela
+        status_disponiveis = ["Todos", "✅ Entregue", "⏳ Pendente", "🚨 Devolução Fábrica", "❌ Recusado"]
         escolha_status = st.selectbox("Filtrar por Status:", status_disponiveis)
 
-    # Lógica Avançada para capturar Devoluções escritas manualmente na planilha
+    # Lógica Avançada para capturar Devoluções e Recusas escritas manualmente
     def definir_status(linha_nota, df_entregas):
         nota_tratada = str(linha_nota).strip().split('.')[0]
         if df_entregas.empty:
             return "⏳ Pendente"
             
-        # Tenta identificar o nome exato da coluna de notas fiscais na planilha de entregas
         col_nf = 'Nota Fiscal' if 'Nota Fiscal' in df_entregas.columns else df_entregas.columns[0]
         match_entrega = df_entregas[df_entregas[col_nf].astype(str).str.strip().str.split('.').str[0] == nota_tratada]
         
         if not match_entrega.empty:
-            # Se a linha contiver a palavra "devolu" em qualquer campo, muda o status
             conteudo_linha = str(match_entrega.values).lower()
+            
+            # Checagem 1: Procura por "devolu"
             if "devolu" in conteudo_linha:
                 return "🚨 Devolução Fábrica"
+                
+            # Checagem 2: NOVA REGRA - Procura por "recusa"
+            if "recusa" in conteudo_linha:
+                return "❌ Recusado"
+                
             return "✅ Entregue"
         
         return "⏳ Pendente"
@@ -129,8 +135,11 @@ if not df_h.empty:
 
     v_total_f = df_filtrado['Valor_Total'].apply(limpar_moeda).sum()
     c_total_f = df_filtrado['Custo_Total_Nota'].apply(limpar_moeda).sum()
+    
+    # Contadores do painel operacional
     n_entregues_f = len(df_filtrado[df_filtrado['Status'] == "✅ Entregue"])
     n_devolucoes_f = len(df_filtrado[df_filtrado['Status'] == "🚨 Devolução Fábrica"])
+    n_recusados_f = len(df_filtrado[df_filtrado['Status'] == "❌ Recusado"]) # Novo contador
     
     eficiencia_f = (n_entregues_f / len(df_filtrado)) * 100 if len(df_filtrado) > 0 else 0
 
@@ -152,11 +161,13 @@ if not df_h.empty:
     m3.metric("Notas Total", len(df_filtrado))
 
     st.markdown("#### 📦 Operacional")
-    s1, s2, s3, s4 = st.columns(4)
+    # Aumentamos para 5 colunas para caber o novo indicador de Recusados de forma organizada
+    s1, s2, s3, s4, s5 = st.columns(5)
     s1.metric("Entregues", n_entregues_f, delta="Concluído", delta_color="normal")
     s2.metric("Devoluções", n_devolucoes_f, delta="Retorno Fábrica", delta_color="off")
-    s3.metric("Pendentes", len(df_filtrado) - n_entregues_f - n_devolucoes_f, delta="Aguardando", delta_color="inverse")
-    s4.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
+    s3.metric("Recusados", n_recusados_f, delta="Cliente Recusou", delta_color="off") # Nova Métrica
+    s4.metric("Pendentes", len(df_filtrado) - n_entregues_f - n_devolucoes_f - n_recusados_f, delta="Aguardando", delta_color="inverse")
+    s5.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
 
     # ---------------------------------------------------------------------
     # FRONTEND: MAQUIAGEM VISUAL (Exibição sem quebras no Arrow)
