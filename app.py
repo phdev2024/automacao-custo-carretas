@@ -92,11 +92,11 @@ if not df_h.empty:
         escolha_lote = st.selectbox("Filtrar por Lote:", lotes_disponiveis)
     
     with col_f2:
-        # Adicionamos "❌ Recusado" na lista de filtros da tela
-        status_disponiveis = ["Todos", "✅ Entregue", "⏳ Pendente", "🚨 Devolução Fábrica", "❌ Recusado"]
+        # 1. Adicionamos "🚫 Cancelado" na lista de filtros da tela
+        status_disponiveis = ["Todos", "✅ Entregue", "⏳ Pendente", "🚨 Devolução Fábrica", "❌ Recusado", "🚫 Cancelado"]
         escolha_status = st.selectbox("Filtrar por Status:", status_disponiveis)
 
-    # Lógica Avançada para capturar Devoluções e Recusas escritas manualmente
+    # Lógica Avançada para capturar Devoluções, Recusas e Cancelamentos
     def definir_status(linha_nota, df_entregas):
         nota_tratada = str(linha_nota).strip().split('.')[0]
         if df_entregas.empty:
@@ -112,9 +112,13 @@ if not df_h.empty:
             if "devolu" in conteudo_linha:
                 return "🚨 Devolução Fábrica"
                 
-            # Checagem 2: NOVA REGRA - Procura por "recusa"
+            # Checagem 2: Procura por "recusa"
             if "recusa" in conteudo_linha:
                 return "❌ Recusado"
+                
+            # Checagem 3: NOVA REGRA - Procura por "cancela"
+            if "cancela" in conteudo_linha:
+                return "🚫 Cancelado"
                 
             return "✅ Entregue"
         
@@ -139,7 +143,8 @@ if not df_h.empty:
     # Contadores do painel operacional
     n_entregues_f = len(df_filtrado[df_filtrado['Status'] == "✅ Entregue"])
     n_devolucoes_f = len(df_filtrado[df_filtrado['Status'] == "🚨 Devolução Fábrica"])
-    n_recusados_f = len(df_filtrado[df_filtrado['Status'] == "❌ Recusado"]) # Novo contador
+    n_recusados_f = len(df_filtrado[df_filtrado['Status'] == "❌ Recusado"])
+    n_cancelados_f = len(df_filtrado[df_filtrado['Status'] == "🚫 Cancelado"]) # Novo contador
     
     eficiencia_f = (n_entregues_f / len(df_filtrado)) * 100 if len(df_filtrado) > 0 else 0
 
@@ -161,49 +166,11 @@ if not df_h.empty:
     m3.metric("Notas Total", len(df_filtrado))
 
     st.markdown("#### 📦 Operacional")
-    # Aumentamos para 5 colunas para caber o novo indicador de Recusados de forma organizada
-    s1, s2, s3, s4, s5 = st.columns(5)
+    # Ajustamos para 6 colunas para acomodar o painel perfeitamente na horizontal
+    s1, s2, s3, s4, s5, s6 = st.columns(6)
     s1.metric("Entregues", n_entregues_f, delta="Concluído", delta_color="normal")
     s2.metric("Devoluções", n_devolucoes_f, delta="Retorno Fábrica", delta_color="off")
-    s3.metric("Recusados", n_recusados_f, delta="Cliente Recusou", delta_color="off") # Nova Métrica
-    s4.metric("Pendentes", len(df_filtrado) - n_entregues_f - n_devolucoes_f - n_recusados_f, delta="Aguardando", delta_color="inverse")
-    s5.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
-
-    # ---------------------------------------------------------------------
-    # FRONTEND: MAQUIAGEM VISUAL (Exibição sem quebras no Arrow)
-    # ---------------------------------------------------------------------
-    cols_ordenadas = ['Status'] + [c for c in df_filtrado.columns if c != 'Status']
-    df_visual = df_filtrado[cols_ordenadas].copy()
-
-    # Força a conversão rápida para string para evitar conflitos no Streamlit
-    for col in df_visual.columns:
-        df_visual[col] = df_visual[col].astype(str)
-
-    df_visual = df_visual.rename(columns={
-        "KM": "Distância (KM)",
-        "Valor_Total": "Valor Total (R$)",
-        "Custo_Base": "Custo Base (R$)",
-        "Custo_Logcare": "Custo Logcare (R$)",
-        "Custo_Total_Nota": "Custo Total (R$)"
-    })
-    
-    def formatar_para_tela(v, prefixo=""):
-        try:
-            if v is None or v == "" or v == "nan": return f"{prefixo} 0,00".strip()
-            if "R$" in str(v): return v
-            num = float(str(v).replace(',', '.'))
-            return f"{prefixo} {formato_brasil(num)}".strip()
-        except:
-            return str(v)
-
-    cols_fin = ["Valor Total (R$)", "Custo Base (R$)", "Custo Logcare (R$)", "Custo Total (R$)"]
-    for col in cols_fin:
-        if col in df_visual.columns:
-            df_visual[col] = df_visual[col].apply(lambda x: formatar_para_tela(x, "R$"))
-
-    if "Distância (KM)" in df_visual.columns:
-        df_visual["Distância (KM)"] = df_visual["Distância (KM)"].apply(lambda x: formatar_para_tela(x))
-
-    st.dataframe(df_visual, use_container_width=True)
-else:
-    st.info("Nenhum dado encontrado no histórico. Use a barra lateral para processar um novo lote de XMLs.")
+    s3.metric("Recusados", n_recusados_f, delta="Cliente Recusou", delta_color="off")
+    s4.metric("Cancelados", n_cancelados_f, delta="NF Cancelada", delta_color="off") # Nova Métrica
+    s5.metric("Pendentes", len(df_filtrado) - n_entregues_f - n_devolucoes_f - n_recusados_f - n_cancelados_f, delta="Aguardando", delta_color="inverse")
+    s6.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
