@@ -174,3 +174,42 @@ if not df_h.empty:
     s4.metric("Cancelados", n_cancelados_f, delta="NF Cancelada", delta_color="off") # Nova Métrica
     s5.metric("Pendentes", len(df_filtrado) - n_entregues_f - n_devolucoes_f - n_recusados_f - n_cancelados_f, delta="Aguardando", delta_color="inverse")
     s6.metric("Eficiência", f"{eficiencia_f:.1f}%", delta=msg_eficiencia, delta_color=cor_eficiencia)
+
+    # ---------------------------------------------------------------------
+    # FRONTEND: MAQUIAGEM VISUAL (Exibição sem quebras no Arrow)
+    # ---------------------------------------------------------------------
+    cols_ordenadas = ['Status'] + [c for c in df_filtrado.columns if c != 'Status']
+    df_visual = df_filtrado[cols_ordenadas].copy()
+
+    # Força a conversão rápida para string para evitar conflitos no Streamlit
+    for col in df_visual.columns:
+        df_visual[col] = df_visual[col].astype(str)
+
+    df_visual = df_visual.rename(columns={
+        "KM": "Distância (KM)",
+        "Valor_Total": "Valor Total (R$)",
+        "Custo_Base": "Custo Base (R$)",
+        "Custo_Logcare": "Custo Logcare (R$)",
+        "Custo_Total_Nota": "Custo Total (R$)"
+    })
+    
+    def formatar_para_tela(v, prefixo=""):
+        try:
+            if v is None or v == "" or v == "nan": return f"{prefixo} 0,00".strip()
+            if "R$" in str(v): return v
+            num = float(str(v).replace(',', '.'))
+            return f"{prefixo} {formato_brasil(num)}".strip()
+        except:
+            return str(v)
+
+    cols_fin = ["Valor Total (R$)", "Custo Base (R$)", "Custo Logcare (R$)", "Custo Total (R$)"]
+    for col in cols_fin:
+        if col in df_visual.columns:
+            df_visual[col] = df_visual[col].apply(lambda x: formatar_para_tela(x, "R$"))
+
+    if "Distância (KM)" in df_visual.columns:
+        df_visual["Distância (KM)"] = df_visual["Distância (KM)"].apply(lambda x: formatar_para_tela(x))
+
+    st.dataframe(df_visual, use_container_width=True)
+else:
+    st.info("Nenhum dado encontrado no histórico. Use a barra lateral para processar um novo lote de XMLs.")
